@@ -1,12 +1,12 @@
 # radar_sched-Malamute
-##contributors
-Paul Piccirillo
+## Contributors ##
+Paul Piccirillo, Stanford Research Institute
 
-Vidyasagar Sadhu
+Vidyasagar Sadhu, Stanford Research Institute
 
-Soo Kyung Kim
+Soo Kyung Kim, Palo Alto Research Center (= Stanford Resarch Institute)
 
-##Installation
+## Installation ##
 ```
  conda create --name radar python=3.8
  conda activate radar
