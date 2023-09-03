@@ -8,7 +8,7 @@ Soo Kyung Kim, Palo Alto Research Center (= Stanford Resarch Institute)
 
 ## Installation ##
 ```
- conda create --name radar python=3.8
+ conda create --name radar python=3.7
  conda activate radar
  conda install tensorflow==1.15.0
  pip install numpy simpy gym mpi4py stable_baselines
