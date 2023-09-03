@@ -10,6 +10,17 @@ Soo Kyung Kim, Palo Alto Research Center (= Stanford Resarch Institute)
 ```
  conda create --name radar python=3.8
  conda activate radar
- pip install numpy simpy
+ conda install tensorflow==1.15.0
+ pip install numpy simpy gym mpi4py stable_baselines
+```
 
+## Execution ##
+### test environment ###
+```
+python env/main.py
+```
+
+### train ppo ###
+```
+python env/train_ppo.py 
 ```

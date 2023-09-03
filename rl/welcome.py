@@ -1,4 +1,4 @@
-from module2.foo import getHello
+from env.foo import getHello
 
 class WelcomeManager():
     def welcome(self):
