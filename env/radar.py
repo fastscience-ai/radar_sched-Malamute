@@ -7,7 +7,6 @@ import random
 import numpy as np
 import simpy
 
-
 class Target(object):
     """A target either moves at a constant speed or sits stationary.
 
@@ -100,7 +99,6 @@ class Target(object):
 
 
 class Radar(gym.Env):
-
     def __init__(self):
         self.RANDOM_SEED = 45
         self.NUM_TARGET = 2          # Number of targets
@@ -120,10 +118,11 @@ class Radar(gym.Env):
         self.target_info_current = np.zeros((self.NUM_TARGET,5))
         self.target_info_prior = np.zeros((self.NUM_TARGET,5))
         self.viewer = None
+        self.done = False
 
         high = np.array([[1, 1, 1, 1, 1], [1, 1, 1, 1, 1] ], dtype=np.int32) #shape (NUM_TARGET, 5)
         low = np.array([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0] ], dtype=np.int32)
-        self.action_space = spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
+        self.action_space = spaces.Discrete(11) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
         self.observation_space = spaces.Box(low=low, high=high, dtype=np.int32)
 
         self.seed()
@@ -133,6 +132,7 @@ class Radar(gym.Env):
 
 
     def step(self, int_type):
+        print("action\n\n\n\n\n",int_type) 
         # Execution
         simtime = 0
         targetname = np.zeros((self.NUM_TARGET),dtype='int')
@@ -151,10 +151,11 @@ class Radar(gym.Env):
                 done_in2 = 2
             simtime += done_in2
             #SOO
-            try: 
-                self.sim.run(until=simtime)
-            except:
-                simtime+=1
+            #try: 
+            #    self.sim.run(until=simtime)
+            #except:
+            #    simtime+=1
+            self.sim.run(until=simtime)
             print("At time = %d" % simtime)
             print([self.targets])
             # Use printed target string to generate current target information
@@ -234,7 +235,8 @@ class Radar(gym.Env):
                     else :
                         self.target_info_current[i,2] = 0
         reward = sum(self.target_info_current[:,2]-self.target_info_prior[:,2])
-        return self._get_obs(), reward, False, {}
+        self.done = True
+        return self._get_obs(), reward, self.done, {}
 
     def reset(self):
         # Create a simulation and start the setup process
@@ -270,7 +272,7 @@ class Radar(gym.Env):
             ively[i] = random.randint(-self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
             istate[i] = random.randint(0,1)
 
-            self.targets = [Target(self.sim, i, iposx[i], iposy[i], ivelx[i], ively[i], istate[i] )
+        self.targets = [Target(self.sim, i, iposx[i], iposy[i], ivelx[i], ively[i], istate[i] )
                     for i in range(self.NUM_TARGET)] 
         
         return self._get_obs()

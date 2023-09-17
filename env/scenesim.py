@@ -272,5 +272,5 @@ while simtime < SIM_TIME :
                 target_info_current[i,2] -= COAST_PEN
             else :
                 target_info_current[i,2] = 0
-                 
+    print("printing", target_info_current, target_info_current[:,2])           
 print("All done!")

@@ -65,12 +65,13 @@ gym.envs.registration.register(
 
 # Create gym environment 
 env = gym.make("Radar-v0")
+env.seed(42)
 state = env.reset()
-print(state)
+#print(state)
 action = random.randint(0,10)
-print(action)
+#print(action)
 state,reward,done,_=env.step(action)
-print(reward)
+#print(reward)
 
 # Train PPO
 log_dir ="./ppo_temponly/"
