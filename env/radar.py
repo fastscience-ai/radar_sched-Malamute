@@ -21,18 +21,22 @@ class Target(object):
         self.velx = velx
         self.vely = vely
         self.state = state       # 1 = moving, 0 = stationary        
-        self.process = sim.process(self.move(name, posx, posy, velx, vely, state))
+        self.process = sim.process(self.move(name, posx, posy, velx, vely))
         sim.process(self.interrogate())
-        self.MOV_MEAN = 10.0         # Avg. target moving time in minutes
-        self.MOV_SIGMA = 2.0         # Sigma of target moving time
+        self.MOV_MEAN = None
+        self.MOV_SIGMA = None
+        self.STA_MEAN = None
+        self.STA_SIGMA = None
 
     def movetime(self):
         # Time that target spends moving
-        return random.normalvariate(self.MOV_MEAN, self.MOV_SIGMA)
+        # return random.normalvariate(self.MOV_MEAN, self.MOV_SIGMA)
+        return random.randint(self.MOV_MEAN-self.MOV_SIGMA, self.MOV_MEAN+self.MOV_SIGMA)
 
     def stattime(self):
         # Time that target spends stationary
-        return random.normalvariate(self.STA_MEAN, self.STA_SIGMA)
+        # return random.normalvariate(self.STA_MEAN, self.STA_SIGMA)
+        return random.randint(self.STA_MEAN-self.STA_SIGMA, self.STA_MEAN+self.STA_SIGMA)
 
     def time_to_interrogate(self):
         # Set interrogation time - without this, moving targets will not have
@@ -43,7 +47,7 @@ class Target(object):
         self.done_in2 = 1
         return self.done_in2
 
-    def move(self, name, posx, posy, velx, vely, state):
+    def move(self, name, posx, posy, velx, vely):
         """Move from location posx posy with velx and vely until end of motion.
         
         velx and vely set by state (=assigned values when state=1, =0 when state=0)
@@ -105,8 +109,7 @@ class Target(object):
             yield self.sim.timeout(self.time_to_interrogate())
 
             self.process.interrupt()
-    def done_in2(self):
-        return self.done_in2
+
     def __repr__(self):
         # Define the outputs to be sent to the simulation for further processing
         return "Target,%d,state,%d,xpos,%.2f,ypos,%.2f" % (self.name, self.state, self.posx, self.posy)
@@ -134,147 +137,160 @@ class Radar(gym.Env):
         self.STRENGTH_INC = 10       # Strength increase for target which is detected (fixed for now)
         self.COAST_PEN = 1           # Penalty for coasting (i.e. not detecting) a target in a given time step
         self.SIM_TIME = 50            # Length of simulation1
-        self.target_info_current = np.zeros((self.NUM_TARGET,5))
-        self.target_info_prior = np.zeros((self.NUM_TARGET,5))
+        self.target_info_current = np.zeros((self.NUM_TARGET,6))
+        self.target_info_prior = np.zeros((self.NUM_TARGET,6))
         self.viewer = None
         self.done = False
+        self.num_actions = 6
 
-        high = np.array([[1, 1, 1, 1, 1], [1, 1, 1, 1, 1] ], dtype=np.int32) #shape (NUM_TARGET, 5)
-        low = np.array([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0] ], dtype=np.int32)
-        self.action_space = spaces.Discrete(11) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
-        self.observation_space = spaces.Box(low=low, high=high, dtype=np.int32)
+        # high = np.array([[1, 1, 1, 1, 1], [1, 1, 1, 1, 1] ], dtype=np.int32) #shape (NUM_TARGET, 5)
+        # low = np.array([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0] ], dtype=np.int32)
+        # self.action_space = spaces.Discrete(11) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
+        # self.observation_space = spaces.Box(low=low, high=high, dtype=np.int32)
+        high = np.ones_like(self.target_info_current)*np.Inf
+        low = np.zeros_like(self.target_info_current)
+        self.action_space = spaces.Discrete(self.num_actions) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
+        self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
-        self.seed()
+        # self.seed()
 
-    def seed(self, seed=None):
-        random.seed(self.RANDOM_SEED) # This helps to reproduce the results
+    def set_seed(self, seed=None):
+        # This helps to reproduce the results
+        random.seed(seed if seed else self.RANDOM_SEED)
 
+    def is_done(self):
+        """
+        Tells whether episode is done or not
+        """
+        return self.simtime >= self.SIM_TIME
 
-    def step(self, int_type):
-        print("action\n\n\n\n\n",int_type) 
+    def step(self, action):
         # Step the simulation
-        simtime = 0
+        print("action\n\n\n\n\n", action)
         # the following three arrays keep track of target parameters extracted from
         # interrogating the targets
         targetname = np.zeros((self.NUM_TARGET),dtype='int')
         targetmode = np.zeros((self.NUM_TARGET),dtype='int')
         targetpos = np.zeros((self.NUM_TARGET,2),dtype='float')
-        while simtime < self.SIM_TIME :
-            # update the prior information array
-            self.target_info_prior = self.target_info_current
-            self.target_info_current[:, 5] = 0  # set all targets as not detected in current interrogation
-            # For this simulation, pick actions for agent at random,
-            # in RL system, training will focus on picking actions to maximize
-            # information gain
-            if int_type < 8 :
-                print("MTI mode chosen")
-                done_in2 = 1
-            elif int_type < 10 :
-                print("SAR mode chosen")
-                done_in2 = 4
-            else :
-                print("Self test mode chosen")
-                done_in2 = 2
-            # set time for simulation to be interrogated
-            simtime += done_in2
-            #SOO
-            #try: 
-            #    self.sim.run(until=simtime)
-            #except:
-            #    simtime+=1
-            self.sim.run(until=simtime)
-            print("At time = %d" % simtime)
-            # print out target information string defined in class target
-            print([self.targets])
-            # Use printed target string to generate current target information
-            tstring = str([self.targets])
-            tstring2 = tstring.strip("[]")
-            tsubstring = tstring2.split(",")
-            tarray = np.array(tsubstring)
-            for i in range(self.NUM_TARGET):
-                targetname[i] = int(tarray[8*i+1])
-                targetmode[i] = int(tarray[8*i+3])
-                targetpos[i,0] = float(tarray[8*i+5])
-                targetpos[i,1] = float(tarray[8*i+7])
-            # Interrogate targets to upate detections
-            for i in range(self.NUM_TARGET) :
-                if int_type < 2 :           #MTI Mode Lower left portion of grid
-                    if targetmode[i] == 1 and targetpos[i,0] >= self.GUARD_BAND and targetpos[i,0] <= self.MID_GRID and targetpos[i,1] >= self.GUARD_BAND and targetpos[i,1] <= self.MID_GRID:
-                        self.target_info_current[i,1] = 1
-                        self.target_info_current[i,3] = targetpos[i,0]
-                        self.target_info_current[i,4] = targetpos[i,1]
-                        if self.target_info_prior[i,1] == 0 :
-                            self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
-                        if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
-                            self.target_info_current[i,2] += self.STRENGTH_INC
-                        else :
-                            self.target_info_current[i,2] = self.MAX_STRENGTH
-                        self.target_info_current[i,5] = 1 #mark this target as currently detected
 
-                elif int_type < 4 :         #MTI Mode Upper left portion of grid
-                    if targetmode[i] == 1 and targetpos[i,0] > self.MID_GRID and targetpos[i,0] <= (self.GRID_SIZE - self.GUARD_BAND) and targetpos[i,1] >= self.GUARD_BAND and targetpos[i,1] <= self.MID_GRID:
-                        self.target_info_current[i,1] = 1
-                        self.target_info_current[i,3] = targetpos[i,0]
-                        self.target_info_current[i,4] = targetpos[i,1]
-                        if self.target_info_prior[i,1] == 0 :
-                            self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
-                        if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
-                            self.target_info_current[i,2] += self.STRENGTH_INC
-                        else :
-                            self.target_info_current[i,2] = self.MAX_STRENGTH
-                        self.target_info_current[i,5] = 1 #mark this target as currently detected
-
-                elif int_type < 6 :         #MTI Mode Lower right portion of grid
-                    if targetmode[i] == 1 and targetpos[i,0] >= self.GUARD_BAND and targetpos[i,0] <= self.MID_GRID and targetpos[i,1] > self.MID_GRID and targetpos[i,1] <= (self.GRID_SIZE - self.GUARD_BAND):
-                        self.target_info_current[i,1] = 1
-                        self.target_info_current[i,3] = targetpos[i,0]
-                        self.target_info_current[i,4] = targetpos[i,1]
-                        if self.target_info_prior[i,1] == 0 :
-                            self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
-                        if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
-                            self.target_info_current[i,2] += self.STRENGTH_INC
-                        else :
-                            self.target_info_current[i,2] = self.MAX_STRENGTH
-                        self.target_info_current[i,5] = 1 #mark this target as currently detected
-
-                elif int_type < 8:          #MTI Mode Upper right portion of grid
-                    if targetmode[i] == 1 and targetpos[i,0] > self.MID_GRID and targetpos[i,0] <= (self.GRID_SIZE - self.GUARD_BAND) and targetpos[i,1] > self.MID_GRID and targetpos[i,1] <= (self.GRID_SIZE - self.GUARD_BAND):
-                        self.target_info_current[i,1] = 1
-                        self.target_info_current[i,3] = targetpos[i,0]
-                        self.target_info_current[i,4] = targetpos[i,1]
-                        if self.target_info_prior[i,1] == 0 :
-                            self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
-                        if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
-                            self.target_info_current[i,2] += self.STRENGTH_INC
-                        else :
-                            self.target_info_current[i,2] = self.MAX_STRENGTH
-                        self.target_info_current[i,5] = 1 #mark this target as currently detected
-
-                elif int_type < 10:         # SAR Mode, applies to entire grid
-                    if targetmode[i] == 0 and targetpos[i,0] >= self.GUARD_BAND and targetpos[i,0] <= (self.GRID_SIZE - self.GUARD_BAND) and targetpos[i,1] >= self.GUARD_BAND and targetpos[i,1] <= (self.GRID_SIZE - self.GUARD_BAND):
-                        self.target_info_current[i,1] = 0
-                        self.target_info_current[i,3] = targetpos[i,0]
-                        self.target_info_current[i,4] = targetpos[i,1]
-                        if self.target_info_prior[i,1] == 1 :
-                            self.target_info_current[i,2] = 0      # if target was moving when last interrogated, reset target strength to 0
-                        if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
-                            self.target_info_current[i,2] += self.STRENGTH_INC
-                        else :
-                            self.target_info_current[i,2] = self.MAX_STRENGTH
-                        self.target_info_current[i,5] = 1 #mark this target as currently detected
-
-            # If a target not detected in this time step, apply coasting penalty
-            for i in range(self.NUM_TARGET) :
-                if self.target_info_current[i,5] == 0 :
-                    if self.target_info_current[i,2] > self.COAST_PEN :
-                        self.target_info_current[i,2] -= self.COAST_PEN
+        # update the prior information array
+        self.target_info_prior = self.target_info_current
+        self.target_info_current[:, 5] = 0  # set all targets as not detected in current interrogation
+        # For this simulation, pick actions for agent at random,
+        # in RL system, training will focus on picking actions to maximize
+        # information gain
+        if action < 4 : # 0,1,2,3
+            print("MTI mode chosen")
+            done_in2 = 1
+        elif action == 4 :
+            print("SAR mode chosen")
+            done_in2 = 4
+        else : # action==5
+            print("Self test mode chosen")
+            done_in2 = 2
+        # set time for simulation to be interrogated
+        self.simtime += done_in2
+        #SOO
+        #try:
+        #    self.sim.run(until=simtime)
+        #except:
+        #    simtime+=1
+        self.sim.run(until=self.simtime)
+        print("At time = %d" % self.simtime)
+        # print out target information string defined in class target
+        print([self.targets])
+        # Use printed target string to generate current target information
+        tstring = str([self.targets])
+        tstring2 = tstring.strip("[]")
+        tsubstring = tstring2.split(",")
+        tarray = np.array(tsubstring)
+        for i in range(self.NUM_TARGET):
+            targetname[i] = int(tarray[8*i+1])
+            targetmode[i] = int(tarray[8*i+3])
+            targetpos[i,0] = float(tarray[8*i+5])
+            targetpos[i,1] = float(tarray[8*i+7])
+        # Interrogate targets to upate detections
+        for i in range(self.NUM_TARGET) :
+            if action == 0:           #MTI Mode Lower left portion of grid
+                if targetmode[i] == 1 and targetpos[i,0] >= self.GUARD_BAND and targetpos[i,0] <= self.MID_GRID and targetpos[i,1] >= self.GUARD_BAND and targetpos[i,1] <= self.MID_GRID:
+                    self.target_info_current[i,1] = 1
+                    self.target_info_current[i,3] = targetpos[i,0]
+                    self.target_info_current[i,4] = targetpos[i,1]
+                    if self.target_info_prior[i,1] == 0 :
+                        self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
+                    if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
+                        self.target_info_current[i,2] += self.STRENGTH_INC
                     else :
-                        self.target_info_current[i,2] = 0
-        reward = sum(self.target_info_current[:,2]-self.target_info_prior[:,2])
-        self.done = True
-        return self._get_obs(), reward, self.done, {}
+                        self.target_info_current[i,2] = self.MAX_STRENGTH
+                    self.target_info_current[i,5] = 1 #mark this target as currently detected
 
-    def reset(self):
+            elif action == 1 :         #MTI Mode Upper left portion of grid
+                if targetmode[i] == 1 and targetpos[i,0] > self.MID_GRID and targetpos[i,0] <= (self.GRID_SIZE - self.GUARD_BAND) and targetpos[i,1] >= self.GUARD_BAND and targetpos[i,1] <= self.MID_GRID:
+                    self.target_info_current[i,1] = 1
+                    self.target_info_current[i,3] = targetpos[i,0]
+                    self.target_info_current[i,4] = targetpos[i,1]
+                    if self.target_info_prior[i,1] == 0 :
+                        self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
+                    if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
+                        self.target_info_current[i,2] += self.STRENGTH_INC
+                    else :
+                        self.target_info_current[i,2] = self.MAX_STRENGTH
+                    self.target_info_current[i,5] = 1 #mark this target as currently detected
+
+            elif action == 2 :         #MTI Mode Lower right portion of grid
+                if targetmode[i] == 1 and targetpos[i,0] >= self.GUARD_BAND and targetpos[i,0] <= self.MID_GRID and targetpos[i,1] > self.MID_GRID and targetpos[i,1] <= (self.GRID_SIZE - self.GUARD_BAND):
+                    self.target_info_current[i,1] = 1
+                    self.target_info_current[i,3] = targetpos[i,0]
+                    self.target_info_current[i,4] = targetpos[i,1]
+                    if self.target_info_prior[i,1] == 0 :
+                        self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
+                    if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
+                        self.target_info_current[i,2] += self.STRENGTH_INC
+                    else :
+                        self.target_info_current[i,2] = self.MAX_STRENGTH
+                    self.target_info_current[i,5] = 1 #mark this target as currently detected
+
+            elif action == 3:          #MTI Mode Upper right portion of grid
+                if targetmode[i] == 1 and targetpos[i,0] > self.MID_GRID and targetpos[i,0] <= (self.GRID_SIZE - self.GUARD_BAND) and targetpos[i,1] > self.MID_GRID and targetpos[i,1] <= (self.GRID_SIZE - self.GUARD_BAND):
+                    self.target_info_current[i,1] = 1
+                    self.target_info_current[i,3] = targetpos[i,0]
+                    self.target_info_current[i,4] = targetpos[i,1]
+                    if self.target_info_prior[i,1] == 0 :
+                        self.target_info_current[i,2] = 0      # if target was stationary when last interrogated, reset target strength to 0
+                    if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
+                        self.target_info_current[i,2] += self.STRENGTH_INC
+                    else :
+                        self.target_info_current[i,2] = self.MAX_STRENGTH
+                    self.target_info_current[i,5] = 1 #mark this target as currently detected
+
+            elif action == 4:         # SAR Mode, applies to entire grid
+                if targetmode[i] == 0 and targetpos[i,0] >= self.GUARD_BAND and targetpos[i,0] <= (self.GRID_SIZE - self.GUARD_BAND) and targetpos[i,1] >= self.GUARD_BAND and targetpos[i,1] <= (self.GRID_SIZE - self.GUARD_BAND):
+                    self.target_info_current[i,1] = 0
+                    self.target_info_current[i,3] = targetpos[i,0]
+                    self.target_info_current[i,4] = targetpos[i,1]
+                    if self.target_info_prior[i,1] == 1 :
+                        self.target_info_current[i,2] = 0      # if target was moving when last interrogated, reset target strength to 0
+                    if self.target_info_current[i,2] < (self.MAX_STRENGTH - self.STRENGTH_INC) :
+                        self.target_info_current[i,2] += self.STRENGTH_INC
+                    else :
+                        self.target_info_current[i,2] = self.MAX_STRENGTH
+                    self.target_info_current[i,5] = 1 #mark this target as currently detected
+
+        # If a target not detected in this time step, apply coasting penalty
+        for i in range(self.NUM_TARGET) :
+            if self.target_info_current[i,5] == 0 :
+                if self.target_info_current[i,2] > self.COAST_PEN :
+                    self.target_info_current[i,2] -= self.COAST_PEN
+                else :
+                    self.target_info_current[i,2] = 0
+        # reward = sum(self.target_info_current[:,2]-self.target_info_prior[:,2])
+        reward = sum(self.target_info_current[:,2] >= self.MAX_STRENGTH/2)
+        return self._get_obs(), reward, self.is_done(), {}
+
+    def reset(self, *, seed=None, options=None):
+        # set the passed in seed
+        self.set_seed(seed)
+
         # Create a simulation and start the setup process
         self.sim = simpy.Environment()
 
@@ -309,15 +325,22 @@ class Radar(gym.Env):
         for i in range(self.NUM_TARGET) :
             iposx[i] = random.randint(0,self.GRID_SIZE)
             iposy[i] = random.randint(0,self.GRID_SIZE)
-            ivelx[i] = random.randint(-self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
-            ively[i] = random.randint(-self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
+            ivelx[i] = random.randint(self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
+            ively[i] = random.randint(self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
             istate[i] = random.randint(0,1)
 
         # Initialize the targets
         self.targets = [Target(self.sim, i, iposx[i], iposy[i], ivelx[i], ively[i], istate[i] )
                     for i in range(self.NUM_TARGET)] 
-        
-        return self._get_obs()
+
+        # Update the mov_mean, mov_sigma, sta_mean, sta_sigma for each target from the values here.
+        for i in range(self.NUM_TARGET):
+            self.targets[i].MOV_MEAN = self.MOV_MEAN
+            self.targets[i].MOV_SIGMA = self.MOV_SIGMA
+            self.targets[i].STA_MEAN = self.STA_MEAN
+            self.targets[i].STA_SIGMA = self.STA_SIGMA
+
+        return self._get_obs(), {}
 
     def _get_obs(self):
         return self.target_info_current 

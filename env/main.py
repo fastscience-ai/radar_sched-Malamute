@@ -15,19 +15,21 @@ gym.envs.registration.register(
 
 #(1) Create gym environment 
 env = gym.make("Radar-v0")
-env.seed(72)
-state = env.reset()
+# env.set_seed(72)
+state, info = env.reset(seed=72)
 print("state",state)
-action = random.randint(0,10)
+# action = random.randint(0,10)
+action = random.randint(0,5)
 print("action",action)
-state,reward,done,_=env.step(action)
+state,reward,done,info=env.step(action)
 print("reward",reward, "state", state)
 
 
 observation, info = env.reset()
 for _ in range(1000):
-   action = random.randint(0,10)
-   observation, reward, done, _ = env.step(action)
+   # action = random.randint(0,10)
+   action = random.randint(0,5)
+   observation, reward, done, info = env.step(action)
    print(observation, reward, done)
    if done:
       observation, info = env.reset()
