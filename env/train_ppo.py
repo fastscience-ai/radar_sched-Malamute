@@ -65,7 +65,7 @@ gym.envs.registration.register(
 
 # Create gym environment 
 env = gym.make("Radar-v0")
-env.seed(42)
+#env.seed(42)
 state = env.reset()
 #print(state)
 action = random.randint(0,10)

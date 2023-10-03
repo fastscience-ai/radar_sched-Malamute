@@ -147,8 +147,8 @@ class Radar(gym.Env):
         # low = np.array([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0] ], dtype=np.int32)
         # self.action_space = spaces.Discrete(11) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
         # self.observation_space = spaces.Box(low=low, high=high, dtype=np.int32)
-        high = np.ones_like(self.target_info_current)*np.Inf
-        low = np.zeros_like(self.target_info_current)
+        high = np.array([[np.Inf, np.Inf, np.Inf, np.Inf, np.Inf, np.Inf ],[np.Inf, np.Inf, np.Inf, np.Inf, np.Inf, np.Inf ]]) #np.ones_like(self.target_info_current)*np.Inf
+        low = np.array([[0,0,0,0,0,0],[0,0,0,0,0,0]]) #np.zeros_like(self.target_info_current)
         self.action_space = spaces.Discrete(self.num_actions) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
         self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
@@ -340,7 +340,7 @@ class Radar(gym.Env):
             self.targets[i].STA_MEAN = self.STA_MEAN
             self.targets[i].STA_SIGMA = self.STA_SIGMA
 
-        return self._get_obs(), {}
+        return self._get_obs()
 
     def _get_obs(self):
         return self.target_info_current 
