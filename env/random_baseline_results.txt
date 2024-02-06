@@ -1,0 +1,12 @@
+No. of targets: 2, Test timesteps: 10000, Test episodes: 329, Avg. episode length: 30.3951367781155
+Avg. target detection strength per timestep: 8.233525835866262
+Avg. target detection per timestep: 0.09811550151975684
+Avg. target pd per timestep: 0.276021086568654
+
+
+------Random Baseline Results-------
+
+No. of targets: 2, Test timesteps: 10000, Test episodes: 330, Avg. episode length: 30.303030303030305
+Avg. target detection strength per timestep: 8.153363636363636
+Avg. target detection per timestep: 0.09854545454545455
+Avg. target pd per timestep: 0.27095720256510136

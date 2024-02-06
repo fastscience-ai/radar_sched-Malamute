@@ -9,18 +9,21 @@ Created on Mon Aug  7 22:22:02 2023
 import random
 import numpy as np
 import simpy
+from scipy.stats import norm
 
 # Constants needed for code
 # Values set for testing
 # More typical values given in commented lines
 
 RANDOM_SEED = 45
-NUM_TARGET = 2          # Number of targets
+NUM_TARGET = 2          # Number of targets if fixed
 #NUM_TARGET = 12        # Number of targets for initial training, could be 20
-MOV_MEAN = 10.0         # Avg. target moving time in minutes
-MOV_SIGMA = 2.0         # Sigma of target moving time
-STA_MEAN = 15.0         # Avg. target stationary time in minutes
-STA_SIGMA = 3.0         # Sigma of target stationary time
+MIN_TARGET = 2          # Minimum number of targets
+MAX_TARGET = 20         # Maximum number of targets
+MOV_MEAN = 10           # Avg. target moving time in minutes
+MOV_SIGMA = 2           # Sigma of target moving time
+STA_MEAN = 15           # Avg. target stationary time in minutes
+STA_SIGMA = 3           # Sigma of target stationary time
 
 VEL_MEAN = 2.0          # Avg. target moving velocity
 VEL_SIGMA = 1.0         # Sigma of target moving velocity
@@ -32,17 +35,22 @@ GUARD_BAND = 100        # Size of guard band in which targets move but are not d
 MAX_STRENGTH = 30       # Maximum strength of target (fixed for now)
 STRENGTH_INC = 10       # Strength increase for target which is detected (fixed for now)
 COAST_PEN = 1           # Penalty for coasting (i.e. not detecting) a target in a given time step
+PDFIFTY = 15            # Target strength for PD = 0.50
+PDSCALE = 5             # Scale factor for computing PD
 
 SIM_TIME = 5            # Length of simulation
-#SIM_TIME = 5           # More typical length for simulation
+#SIM_TIME = 50          # More typical length for simulation
 
-# Time that target spends moving
+# Time that target spends moving - can choose between normal distribution 
+# and uniform distribution
 def movetime():
-    return random.normalvariate(MOV_MEAN, MOV_SIGMA)
+#    return random.normalvariate(MOV_MEAN, MOV_SIGMA)
+    return random.uniform(MOV_MEAN - 3*MOV_SIGMA, MOV_MEAN + 3*MOV_SIGMA)
 
 # Time that target spends stationary
 def stattime():
-    return random.normalvariate(STA_MEAN, STA_SIGMA)
+#    return random.normalvariate(STA_MEAN, STA_SIGMA)
+    return random.uniform(STA_MEAN - 3*STA_SIGMA, STA_MEAN + 3*STA_SIGMA)
 
 # Set interrogation time - without this, moving targets will not have
 # their locations update.
@@ -150,6 +158,9 @@ class Target(object):
 print('Target Simulation')
 random.seed(RANDOM_SEED)  # This helps to reproduce the results
 
+# Define number of targets
+NUM_TARGET = random.randint(MIN_TARGET, MAX_TARGET)
+
 # Create an environment and start the setup process
 env = simpy.Environment()
 
@@ -168,11 +179,12 @@ istate = np.zeros((NUM_TARGET))
 #  3: Target x position
 #  4: Target y position
 #  5: Target currently located - 0=no, 1=yes
+#  6: Target PD
 #  Note: while the defined position array is 800x800, 
 #        only the central 600x600 is valid for locating targets (i.e. is the search areas)
 #        This allows targets to enter search area without having to be specially initialized.
-target_info_current = np.zeros((NUM_TARGET,6))
-target_info_prior = np.zeros((NUM_TARGET,6))
+target_info_current = np.zeros((NUM_TARGET,7))
+target_info_prior = np.zeros((NUM_TARGET,7))
 #Initialize target ID #'s in both arrays - these will not change 
 for i in range(NUM_TARGET) :
     target_info_current[i,0] = i
@@ -318,6 +330,11 @@ while simtime < SIM_TIME :
                 target_info_current[i,2] -= COAST_PEN
             else :
                 target_info_current[i,2] = 0
+
+# Calculate PD for all targets
+    for i in range(NUM_TARGET) :
+        arg = (PDFIFTY - target_info_current[i,2])/PDSCALE               
+        target_info_current[i,6] = norm.sf(arg)
                  
 print("All done!")
 

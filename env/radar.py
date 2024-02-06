@@ -6,6 +6,7 @@ from os import path
 import random
 import numpy as np
 import simpy
+from scipy.stats import norm
 
 class Target(object):
     """
@@ -29,14 +30,15 @@ class Target(object):
         self.STA_SIGMA = None
 
     def movetime(self):
-        # Time that target spends moving
+        # Time that target spends moving - can choose between normal distribution
+        # and uniform distribution
         # return random.normalvariate(self.MOV_MEAN, self.MOV_SIGMA)
-        return random.randint(self.MOV_MEAN-self.MOV_SIGMA, self.MOV_MEAN+self.MOV_SIGMA)
+        return random.uniform(self.MOV_MEAN - 3*self.MOV_SIGMA, self.MOV_MEAN + 3*self.MOV_SIGMA)
 
     def stattime(self):
-        # Time that target spends stationary
+        # Time that target spends stationary - same as above
         # return random.normalvariate(self.STA_MEAN, self.STA_SIGMA)
-        return random.randint(self.STA_MEAN-self.STA_SIGMA, self.STA_MEAN+self.STA_SIGMA)
+        return random.uniform(self.STA_MEAN - 3*self.STA_SIGMA, self.STA_MEAN + 3*self.STA_SIGMA)
 
     def time_to_interrogate(self):
         # Set interrogation time - without this, moving targets will not have
@@ -122,12 +124,14 @@ class Radar(gym.Env):
         # Values set for testing
         # More typical values given in commented lines
         self.RANDOM_SEED = 45
-        self.NUM_TARGET = 2          # Number of targets
-        # self.NUM_TARGET = 12         # Number of targets for initial training, could be 20
-        self.MOV_MEAN = 10.0         # Avg. target moving time in minutes
-        self.MOV_SIGMA = 2.0         # Sigma of target moving time
-        self.STA_MEAN = 15.0         # Avg. target stationary time in minutes
-        self.STA_SIGMA = 3.0         # Sigma of target stationary time
+        self.MIN_TARGETS = 2         # Minimum number of targets
+        self.MAX_TARGETS = 20        # Maximum number of targets
+        # self.NUM_TARGETS = random.randint(self.MIN_TARGETS, self.MAX_TARGETS) # Actual number of targets if variable
+        self.NUM_TARGETS = 2          # Number of targets if fixed, for initial training, could be 20
+        self.MOV_MEAN = 10         # Avg. target moving time in minutes
+        self.MOV_SIGMA = 2         # Sigma of target moving time
+        self.STA_MEAN = 15         # Avg. target stationary time in minutes
+        self.STA_SIGMA = 3         # Sigma of target stationary time
         self.VEL_MEAN = 2            # Avg. target moving velocity
         self.VEL_SIGMA = 1           # Sigma of target moving velocity
         self.GRID_SIZE = 800         # Size of grid on which targets move
@@ -136,9 +140,12 @@ class Radar(gym.Env):
         self.MAX_STRENGTH = 30       # Maximum strength of target (fixed for now)
         self.STRENGTH_INC = 10       # Strength increase for target which is detected (fixed for now)
         self.COAST_PEN = 1           # Penalty for coasting (i.e. not detecting) a target in a given time step
+        self.PDFIFTY = 15            # Target strength for PD = 0.50
+        self.PDSCALE = 5             # Scale factor for computing PD
         self.SIM_TIME = 50            # Length of simulation1
-        self.target_info_current = np.zeros((self.NUM_TARGET,6))
-        self.target_info_prior = np.zeros((self.NUM_TARGET,6))
+        self.target_info_current = np.ones(shape=(self.NUM_TARGETS, 7), dtype=np.float32)
+        self.target_info_prior = np.ones(shape=(self.NUM_TARGETS, 7), dtype=np.float32)
+
         self.viewer = None
         self.done = False
         self.num_actions = 6
@@ -147,8 +154,8 @@ class Radar(gym.Env):
         # low = np.array([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0] ], dtype=np.int32)
         # self.action_space = spaces.Discrete(11) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
         # self.observation_space = spaces.Box(low=low, high=high, dtype=np.int32)
-        high = np.array([[np.Inf, np.Inf, np.Inf, np.Inf, np.Inf, np.Inf ],[np.Inf, np.Inf, np.Inf, np.Inf, np.Inf, np.Inf ]]) #np.ones_like(self.target_info_current)*np.Inf
-        low = np.array([[0,0,0,0,0,0],[0,0,0,0,0,0]]) #np.zeros_like(self.target_info_current)
+        high = np.ones_like(self.target_info_current)*np.Inf
+        low = np.zeros_like(self.target_info_current)
         self.action_space = spaces.Discrete(self.num_actions) #spaces.Box(low=0, high=10, shape=(1,), dtype=np.int32)
         self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
@@ -157,6 +164,65 @@ class Radar(gym.Env):
     def set_seed(self, seed=None):
         # This helps to reproduce the results
         random.seed(seed if seed else self.RANDOM_SEED)
+
+    def reset(self, *, seed=None, options=None):
+        # set the passed in seed
+        self.set_seed(seed)
+
+        # Create a simulation and start the setup process
+        self.sim = simpy.Environment()
+
+        # simtime keeps track of the simulation elapsed time
+        self.simtime = 0
+        iposx = np.zeros((self.NUM_TARGETS))
+        iposy = np.zeros((self.NUM_TARGETS))
+        ivelx = np.zeros((self.NUM_TARGETS))
+        ively = np.zeros((self.NUM_TARGETS))
+        istate = np.zeros((self.NUM_TARGETS))
+        # Target state vector definition -
+        # keep both current target state and prior state for comparison
+        # Indices:
+        #  0: Target ID #
+        #  1: Target Movement ID# - 1=moving, 0=stationary
+        #  2: Target detection strength
+        #  3: Target x position
+        #  4: Target y position
+        #  5: Target currently located - 0=no, 1=yes
+        #  6: Target PD
+        #  Note: while the defined position array is 800x800,
+        #        only the central 600x600 is valid for locating targets (i.e. is the search areas)
+        #        This allows targets to enter search area without having to be specially initialized.
+        self.target_info_current = np.zeros_like((self.target_info_current))
+        self.target_info_prior = np.zeros_like(self.target_info_prior)
+        #Initialize target ID #'s in both arrays - these will not change
+        for i in range(self.NUM_TARGETS) :
+            self.target_info_current[i,0] = i
+            self.target_info_prior[i,0] = i
+
+        # Randomly select initial values for targets
+        # Position, velocity, and state
+        for i in range(self.NUM_TARGETS) :
+            iposx[i] = random.randint(0,self.GRID_SIZE)
+            iposy[i] = random.randint(0,self.GRID_SIZE)
+            ivelx[i] = random.randint(self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
+            ively[i] = random.randint(self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
+            istate[i] = random.randint(0,1)
+
+        # Initialize the targets
+        self.targets = [Target(self.sim, i, iposx[i], iposy[i], ivelx[i], ively[i], istate[i] )
+                        for i in range(self.NUM_TARGETS)]
+
+        # Update the mov_mean, mov_sigma, sta_mean, sta_sigma for each target from the values here.
+        for i in range(self.NUM_TARGETS):
+            self.targets[i].MOV_MEAN = self.MOV_MEAN
+            self.targets[i].MOV_SIGMA = self.MOV_SIGMA
+            self.targets[i].STA_MEAN = self.STA_MEAN
+            self.targets[i].STA_SIGMA = self.STA_SIGMA
+
+        return self._get_obs()
+
+    def _get_obs(self):
+        return self.target_info_current
 
     def is_done(self):
         """
@@ -167,11 +233,12 @@ class Radar(gym.Env):
     def step(self, action):
         # Step the simulation
         print("action\n\n\n\n\n", action)
+        assert action <= 5, "Unknown action"
         # the following three arrays keep track of target parameters extracted from
         # interrogating the targets
-        targetname = np.zeros((self.NUM_TARGET),dtype='int')
-        targetmode = np.zeros((self.NUM_TARGET),dtype='int')
-        targetpos = np.zeros((self.NUM_TARGET,2),dtype='float')
+        targetname = np.zeros((self.NUM_TARGETS), dtype='int')
+        targetmode = np.zeros((self.NUM_TARGETS), dtype='int')
+        targetpos = np.zeros((self.NUM_TARGETS, 2), dtype='float')
 
         # update the prior information array
         self.target_info_prior = self.target_info_current
@@ -204,13 +271,13 @@ class Radar(gym.Env):
         tstring2 = tstring.strip("[]")
         tsubstring = tstring2.split(",")
         tarray = np.array(tsubstring)
-        for i in range(self.NUM_TARGET):
+        for i in range(self.NUM_TARGETS):
             targetname[i] = int(tarray[8*i+1])
             targetmode[i] = int(tarray[8*i+3])
             targetpos[i,0] = float(tarray[8*i+5])
             targetpos[i,1] = float(tarray[8*i+7])
         # Interrogate targets to upate detections
-        for i in range(self.NUM_TARGET) :
+        for i in range(self.NUM_TARGETS) :
             if action == 0:           #MTI Mode Lower left portion of grid
                 if targetmode[i] == 1 and targetpos[i,0] >= self.GUARD_BAND and targetpos[i,0] <= self.MID_GRID and targetpos[i,1] >= self.GUARD_BAND and targetpos[i,1] <= self.MID_GRID:
                     self.target_info_current[i,1] = 1
@@ -276,74 +343,21 @@ class Radar(gym.Env):
                         self.target_info_current[i,2] = self.MAX_STRENGTH
                     self.target_info_current[i,5] = 1 #mark this target as currently detected
 
-        # If a target not detected in this time step, apply coasting penalty
-        for i in range(self.NUM_TARGET) :
+        for i in range(self.NUM_TARGETS) :
+            # If a target not detected in this time step, apply coasting penalty
             if self.target_info_current[i,5] == 0 :
                 if self.target_info_current[i,2] > self.COAST_PEN :
                     self.target_info_current[i,2] -= self.COAST_PEN
                 else :
                     self.target_info_current[i,2] = 0
+            # Calculate PD based on current detection strength and formula using erfc
+            arg = (self.PDFIFTY - self.target_info_current[i,2])/self.PDSCALE
+            self.target_info_current[i,6] = norm.sf(arg)
+
         # reward = sum(self.target_info_current[:,2]-self.target_info_prior[:,2])
         reward = sum(self.target_info_current[:,2] >= self.MAX_STRENGTH/2)
+        # reward = sum(self.target_info_current[:,6]) # maximize prob. of detect (PD) of all targets.
         return self._get_obs(), reward, self.is_done(), {}
-
-    def reset(self, *, seed=None, options=None):
-        # set the passed in seed
-        self.set_seed(seed)
-
-        # Create a simulation and start the setup process
-        self.sim = simpy.Environment()
-
-        # simtime keeps track of the simulation elapsed time
-        self.simtime = 0
-        iposx = np.zeros((self.NUM_TARGET))
-        iposy = np.zeros((self.NUM_TARGET))
-        ivelx = np.zeros((self.NUM_TARGET))
-        ively = np.zeros((self.NUM_TARGET))
-        istate = np.zeros((self.NUM_TARGET))
-        # Target state vector definition - 
-        # keep both current target state and prior state for comparison
-        # Indices:
-        #  0: Target ID #
-        #  1: Target Movement ID# - 1=moving, 0=stationary
-        #  2: Target detection strength
-        #  3: Target x position
-        #  4: Target y position
-        #  5: Target currently located - 0=no, 1=yes
-        #  Note: while the defined position array is 800x800, 
-        #        only the central 600x600 is valid for locating targets (i.e. is the search areas)
-        #        This allows targets to enter search area without having to be specially initialized.
-        self.target_info_current = np.zeros((self.NUM_TARGET,6))
-        self.target_info_prior = np.zeros((self.NUM_TARGET,6))
-        #Initialize target ID #'s in both arrays - these will not change 
-        for i in range(self.NUM_TARGET) :
-            self.target_info_current[i,0] = i
-            self.target_info_prior[i,0] = i
-
-        # Randomly select initial values for targets
-        # Position, velocity, and state
-        for i in range(self.NUM_TARGET) :
-            iposx[i] = random.randint(0,self.GRID_SIZE)
-            iposy[i] = random.randint(0,self.GRID_SIZE)
-            ivelx[i] = random.randint(self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
-            ively[i] = random.randint(self.VEL_MEAN - self.VEL_SIGMA, self.VEL_MEAN + self.VEL_SIGMA)
-            istate[i] = random.randint(0,1)
-
-        # Initialize the targets
-        self.targets = [Target(self.sim, i, iposx[i], iposy[i], ivelx[i], ively[i], istate[i] )
-                    for i in range(self.NUM_TARGET)] 
-
-        # Update the mov_mean, mov_sigma, sta_mean, sta_sigma for each target from the values here.
-        for i in range(self.NUM_TARGET):
-            self.targets[i].MOV_MEAN = self.MOV_MEAN
-            self.targets[i].MOV_SIGMA = self.MOV_SIGMA
-            self.targets[i].STA_MEAN = self.STA_MEAN
-            self.targets[i].STA_SIGMA = self.STA_SIGMA
-
-        return self._get_obs()
-
-    def _get_obs(self):
-        return self.target_info_current 
 
     def render(self, mode='human'):
         pass
